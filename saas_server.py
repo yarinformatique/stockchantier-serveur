@@ -212,7 +212,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             row = c.fetchone()
             conn.close()
             if not row:
-                self.send_json({'success': False, 'status': 'deleted', 'error': "Entreprise supprimée ou inexistante."}, status=404)
+                self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
                 return
             if row[1] != 'active':
                 self.send_json({'success': False, 'status': 'suspended', 'error': "L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
@@ -272,12 +272,59 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             row = c.fetchone()
             conn.close()
             if not row:
-                self.send_json({'success': False, 'status': 'deleted', 'error': "Entreprise supprimée ou inexistante."}, status=404)
+                self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
                 return
             if row[1] != 'active':
                 self.send_json({'success': False, 'status': 'suspended', 'error': "L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
                 return
             self.send_json({'success': True, 'status': 'active', 'name': row[2], 'expires_at': row[3]})
+            return
+
+        # API : Enregistrement ou mise à jour automatique d'une entreprise activée par Pass
+        if path == '/api/client/company/register':
+            code = body.get('code', '').strip()
+            name = body.get('name', '').strip()
+            ceo_name = body.get('ceo_name', '').strip()
+            ceo_email = body.get('ceo_email', '').strip() or ceo_name
+            password = body.get('ceo_password', '').strip() or 'admin123'
+            currency = body.get('currency', 'FCFA').strip()
+            expires_at = body.get('expires_at', '31/12/2030').strip()
+            users = body.get('users', [])
+
+            if not code or not name:
+                self.send_json({'success': False, 'error': "Code et Nom d'entreprise requis"}, status=400)
+                return
+
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute('SELECT id, status, synced_state FROM companies WHERE code = ?', (code,))
+            row = c.fetchone()
+            if row:
+                state = json.loads(row[2]) if row[2] else {}
+                if users:
+                    state['users'] = users
+                c.execute('UPDATE companies SET synced_state = ? WHERE code = ?', (json.dumps(state), code))
+                conn.commit()
+                conn.close()
+                self.send_json({'success': True, 'status': row[1], 'message': 'Entreprise déjà enregistrée sur le serveur'})
+                return
+
+            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            initial_state = {
+                'users': users,
+                'last_sync': datetime.now().strftime('%d/%m/%Y %H:%M')
+            }
+            try:
+                c.execute('''
+                    INSERT INTO companies (code, name, ceo_name, ceo_email, ceo_password_hash, ceo_password_clear, status, currency, plan_duration, created_at, expires_at, synced_state)
+                    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, '1_YEAR', ?, ?, ?)
+                ''', (code, name, ceo_name, ceo_email, pwd_hash, password, currency, datetime.now().strftime('%d/%m/%Y'), '2030-12-31', json.dumps(initial_state)))
+                conn.commit()
+                conn.close()
+                self.send_json({'success': True, 'status': 'active', 'message': 'Entreprise synchronisée avec succès sur le Cloud !'})
+            except Exception as e:
+                conn.close()
+                self.send_json({'success': False, 'error': str(e)}, status=500)
             return
 
         # API : Génération et réservation atomique d'un numéro de document officiel (Anti-doublon)
