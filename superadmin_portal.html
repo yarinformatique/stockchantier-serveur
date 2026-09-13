@@ -630,7 +630,7 @@
       document.getElementById('reset-comp-id').value = comp.id;
 
       // Générer le Pass d'activation client complet
-      const serverOrigin = (window.location.origin && !window.location.origin.startsWith('file:')) ? window.location.origin : 'http://10.100.191.164:9000';
+      const serverOrigin = (window.location.origin && !window.location.origin.startsWith('file:')) ? window.location.origin : 'https://stockchantier-serveur.onrender.com';
       const passObj = {
         v: 1,
         code: comp.code,
