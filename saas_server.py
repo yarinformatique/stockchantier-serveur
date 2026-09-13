@@ -91,22 +91,13 @@ def init_db():
         )
     ''')
 
-    # Créer ou mettre à jour le compte Super-Admin (yarinformatique avec code 1762)
+    # Créer ou mettre à jour le compte Super-Admin (strictement yarinformatique avec code 1762)
     pwd_1762 = hashlib.sha256("1762".encode()).hexdigest()
-    pwd_legacy = hashlib.sha256("superadmin123".encode()).hexdigest()
     c.execute('DELETE FROM superadmin')
     c.execute('''
         INSERT INTO superadmin (id, email, password_hash, name)
         VALUES (1, 'yarinformatique', ?, 'Direction YAR INFORMATIQUE — M. YAGO')
     ''', (pwd_1762,))
-    c.execute('''
-        INSERT OR IGNORE INTO superadmin (id, email, password_hash, name)
-        VALUES (2, 'Abdoul Yago', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
-    ''', (pwd_1762,))
-    c.execute('''
-        INSERT OR IGNORE INTO superadmin (id, email, password_hash, name)
-        VALUES (3, 'superadmin@stockchantier.com', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
-    ''', (pwd_legacy,))
     
     conn.commit()
     conn.close()
@@ -348,24 +339,15 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
         if path == '/api/superadmin/login':
             identifier = body.get('email', '').strip().lower()
             password = body.get('password', '').strip()
-            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
 
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute('''
-                SELECT id, name, email FROM superadmin 
-                WHERE (LOWER(email) = ? OR LOWER(name) LIKE ?)
-                  AND (password_hash = ? OR ? IN ('1762', 'superadmin123'))
-            ''', (identifier, f'%{identifier}%', pwd_hash, password))
-            row = c.fetchone()
-            conn.close()
-
-            # Permettre directement yarinformatique ou Abdoul Yago avec 1762
-            if not row and ('yarinformatique' in identifier or 'abdoul' in identifier or 'yago' in identifier or 'superadmin' in identifier) and (password in ('1762', 'superadmin123')):
-                row = (1, 'Direction YAR INFORMATIQUE — M. YAGO', 'yarinformatique')
-
-            if row:
-                self.send_json({'success': True, 'token': str(uuid.uuid4()), 'name': row[1], 'email': row[2] if len(row) > 2 else 'yarinformatique'})
+            # Super-Admin exclusif : strictement 'yarinformatique' et '1762'
+            if identifier == 'yarinformatique' and password == '1762':
+                self.send_json({
+                    'success': True,
+                    'token': str(uuid.uuid4()),
+                    'name': 'Direction YAR INFORMATIQUE — M. YAGO',
+                    'email': 'yarinformatique'
+                })
             else:
                 self.send_json({'success': False, 'error': 'Identifiant ou code secret incorrect.'}, status=401)
             return
@@ -576,12 +558,12 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
 
-            # 1. Vérifier si l'identifiant existe parmi les dirigeants d'entreprise
+            # 1. Vérifier si l'identifiant existe parmi les dirigeants d'entreprise (PDG)
             c.execute('''
                 SELECT id, code, name, ceo_name, status, currency, expires_at, synced_state, ceo_password_clear, ceo_password_hash, ceo_email
                 FROM companies 
-                WHERE (LOWER(ceo_email) = ? OR LOWER(ceo_name) = ? OR LOWER(ceo_name) LIKE ?)
-            ''', (identifier, identifier, f'%{identifier}%'))
+                WHERE (LOWER(ceo_email) = ? OR LOWER(ceo_name) = ?)
+            ''', (identifier, identifier))
             comp_row = c.fetchone()
 
             target_user = None
@@ -590,6 +572,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             if comp_row:
                 found_company = comp_row
                 target_user = {
+                    'id': 'usr-ceo-' + str(comp_row[0]),
                     'name': comp_row[3],
                     'email': comp_row[10] or comp_row[3],
                     'role': 'admin',
@@ -597,18 +580,19 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                     'pwd_clear': comp_row[8]
                 }
             else:
-                # Chercher parmi les utilisateurs secondaires (Chefs de chantier, magasiniers)
+                # Chercher parmi les collaborateurs de l'entreprise (Chefs de chantier, magasiniers)
                 c.execute('SELECT id, code, name, ceo_name, status, currency, expires_at, synced_state, ceo_password_clear, ceo_password_hash, ceo_email FROM companies')
                 all_comps = c.fetchall()
                 for comp in all_comps:
                     state = json.loads(comp[7]) if comp[7] else {}
                     users = state.get('users', []) + state.get('initial_users', [])
                     for u in users:
-                        u_name = u.get('name', '').lower().strip()
-                        u_email = u.get('email', '').lower().strip()
-                        if u_email == identifier or u_name == identifier or (len(identifier) >= 3 and identifier == u_name):
+                        u_name = (u.get('name') or '').lower().strip()
+                        u_email = (u.get('email') or '').lower().strip()
+                        if u_email == identifier or u_name == identifier:
                             found_company = comp
                             target_user = {
+                                'id': u.get('id') or ('usr-collab-' + str(comp[0])),
                                 'name': u.get('name'),
                                 'email': u.get('email') or u.get('name'),
                                 'role': u.get('role', 'magasinier'),

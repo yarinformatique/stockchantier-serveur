@@ -588,7 +588,7 @@
         }
 
         // Vérification directe de sécurité pour yarinformatique et 1762
-        if (!success && (identifier.toLowerCase() === 'yarinformatique' || identifier.toLowerCase() === 'abdoul yago') && password === '1762') {
+        if (!success && identifier.toLowerCase() === 'yarinformatique' && password === '1762') {
           success = true;
           token = 'token-direct-' + Date.now();
         }
