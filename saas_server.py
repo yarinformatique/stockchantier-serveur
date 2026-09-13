@@ -78,15 +78,18 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
-    # Table Séquences et Numérotations de Documents (Anti-doublons)
+    # Table Entreprises Supprimées (Kill-Switch & historique)
     c.execute('''
         CREATE TABLE IF NOT EXISTS deleted_companies (
             code TEXT PRIMARY KEY,
             name TEXT,
             deleted_at TEXT
-        );
+        )
+    ''')
 
-    CREATE TABLE IF NOT EXISTS company_document_sequences (
+    # Table Séquences et Numérotations de Documents (Anti-doublons)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS company_document_sequences (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             company_code TEXT,
             doc_type TEXT,
@@ -107,6 +110,56 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+
+CLOUD_SYNC_URL = "https://stockchantier-serveur.onrender.com"
+
+def forward_action_to_cloud(action, code, payload=None):
+    """Propage silencieusement en tâche de fond les actions SuperAdmin locales vers le Cloud Render."""
+    if os.environ.get('RENDER'):
+        return
+    def _worker():
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            auth_bytes = base64.b64encode(b"yarinformatique:1762").decode("ascii")
+            headers = {
+                "Authorization": f"Basic {auth_bytes}",
+                "Content-Type": "application/json"
+            }
+            if action == 'create':
+                req = urllib.request.Request(f"{CLOUD_SYNC_URL}/api/superadmin/companies/create", data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+                urllib.request.urlopen(req, context=ctx, timeout=8)
+                print(f"[CLOUD SYNC] Entreprise créée sur le Cloud: {code}")
+                return
+
+            req_list = urllib.request.Request(f"{CLOUD_SYNC_URL}/api/superadmin/companies", headers=headers)
+            with urllib.request.urlopen(req_list, context=ctx, timeout=8) as r:
+                cdata = json.loads(r.read().decode('utf-8'))
+                comps = cdata.get('companies', []) if isinstance(cdata, dict) else cdata
+                cloud_comp = next((c for c in comps if c.get('code') == code), None)
+
+            if not cloud_comp:
+                print(f"[CLOUD SYNC] Entreprise {code} introuvable sur le Cloud pour action {action}")
+                return
+
+            cloud_id = cloud_comp['id']
+            if action == 'toggle':
+                target_status = payload.get('status') if payload else None
+                if not target_status or cloud_comp.get('status') != target_status:
+                    req_t = urllib.request.Request(f"{CLOUD_SYNC_URL}/api/superadmin/companies/{cloud_id}/toggle", data=b"{}", headers=headers, method='POST')
+                    urllib.request.urlopen(req_t, context=ctx, timeout=8)
+                    print(f"[CLOUD SYNC] Statut synchronisé sur le Cloud pour {code}: {target_status}")
+            elif action == 'delete':
+                req_d = urllib.request.Request(f"{CLOUD_SYNC_URL}/api/superadmin/companies/{cloud_id}/delete", data=b"{}", headers=headers, method='POST')
+                urllib.request.urlopen(req_d, context=ctx, timeout=8)
+                print(f"[CLOUD SYNC] Entreprise {code} définitivement supprimée du Cloud.")
+        except Exception as e:
+            print(f"[CLOUD SYNC] Notification Cloud ({action} {code}): {e}")
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
 
 class SaaSRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -149,9 +202,11 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                     self.send_json({'success': False, 'error': 'Entreprise introuvable'}, status=404)
                     return
                 c_name, c_code = row[0], row[1]
+                c.execute('INSERT OR REPLACE INTO deleted_companies (code, name, deleted_at) VALUES (?, ?, ?)', (c_code, c_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 c.execute('DELETE FROM companies WHERE id = ?', (cid,))
                 conn.commit()
                 conn.close()
+                forward_action_to_cloud('delete', c_code, None)
                 self.send_json({'success': True, 'message': f"L'entreprise '{c_name}' ({c_code}) a été définitivement supprimée."})
             except Exception as e:
                 self.send_json({'success': False, 'error': str(e)}, status=500)
@@ -225,7 +280,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             row = c.fetchone()
             conn.close()
             if not row:
-                self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
+                self.send_json({'success': False, 'status': 'deleted', 'reason': 'ACCOUNT_DELETED', 'error': "⛔ ACCÈS RÉVOQUÉ : Cette entreprise n'existe plus ou a été supprimée."}, status=404)
                 return
             if row[1] != 'active':
                 self.send_json({'success': False, 'status': 'suspended', 'error': "⛔ ACCÈS SUSPENDU : L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
@@ -292,7 +347,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             row = c.fetchone()
             conn.close()
             if not row:
-                self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
+                self.send_json({'success': False, 'status': 'deleted', 'reason': 'ACCOUNT_DELETED', 'error': "⛔ ACCÈS RÉVOQUÉ : Cette entreprise n'existe plus ou a été supprimée."}, status=404)
                 return
             if row[1] != 'active':
                 self.send_json({'success': False, 'status': 'suspended', 'error': "⛔ ACCÈS SUSPENDU : L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
@@ -557,7 +612,13 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                     if c_row:
                         c.execute('DELETE FROM deleted_companies WHERE code = ?', (c_row[0],))
                 conn.commit()
+                # Récupérer le code de l'entreprise pour réplication Cloud
+                c.execute('SELECT code FROM companies WHERE id = ?', (cid,))
+                c_code_row = c.fetchone()
+                c_code_target = c_code_row[0] if c_code_row else ''
                 conn.close()
+                if c_code_target:
+                    forward_action_to_cloud('toggle', c_code_target, {'status': new_status})
                 self.send_json({'success': True, 'new_status': new_status})
             except Exception as e:
                 self.send_json({'success': False, 'error': str(e)}, status=500)
@@ -580,6 +641,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                 c.execute('DELETE FROM companies WHERE id = ?', (cid,))
                 conn.commit()
                 conn.close()
+                forward_action_to_cloud('delete', c_code, None)
                 self.send_json({'success': True, 'message': f"L'entreprise '{c_name}' ({c_code}) a été définitivement supprimée."})
             except Exception as e:
                 self.send_json({'success': False, 'error': str(e)}, status=500)
