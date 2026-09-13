@@ -80,7 +80,13 @@ def init_db():
 
     # Table Séquences et Numérotations de Documents (Anti-doublons)
     c.execute('''
-        CREATE TABLE IF NOT EXISTS company_document_sequences (
+        CREATE TABLE IF NOT EXISTS deleted_companies (
+            code TEXT PRIMARY KEY,
+            name TEXT,
+            deleted_at TEXT
+        );
+
+    CREATE TABLE IF NOT EXISTS company_document_sequences (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             company_code TEXT,
             doc_type TEXT,
@@ -205,9 +211,16 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
         # API : Vérification du statut de l'entreprise (Kill-switch distant)
         if path == '/api/client/status':
             query = urllib.parse.parse_qs(parsed.query)
-            company_code = query.get('code', [''])[0]
+            company_code = query.get('code', [''])[0].strip()
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
+            c.execute('SELECT name, deleted_at FROM deleted_companies WHERE code = ?', (company_code,))
+            del_row = c.fetchone()
+            if del_row:
+                conn.close()
+                self.send_json({'success': False, 'status': 'deleted', 'error': f"⛔ ACCÈS RÉVOQUÉ : L'entreprise '{del_row[0]}' a été définitivement supprimée par l'administrateur M. YAGO."}, status=403)
+                return
+
             c.execute('SELECT id, status, name, expires_at FROM companies WHERE code = ?', (company_code,))
             row = c.fetchone()
             conn.close()
@@ -215,7 +228,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                 self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
                 return
             if row[1] != 'active':
-                self.send_json({'success': False, 'status': 'suspended', 'error': "L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
+                self.send_json({'success': False, 'status': 'suspended', 'error': "⛔ ACCÈS SUSPENDU : L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
                 return
             self.send_json({'success': True, 'status': 'active', 'name': row[2], 'expires_at': row[3]})
             return
@@ -268,6 +281,13 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             company_code = body.get('code', '').strip()
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
+            c.execute('SELECT name, deleted_at FROM deleted_companies WHERE code = ?', (company_code,))
+            del_row = c.fetchone()
+            if del_row:
+                conn.close()
+                self.send_json({'success': False, 'status': 'deleted', 'error': f"⛔ ACCÈS RÉVOQUÉ : L'entreprise '{del_row[0]}' a été définitivement supprimée par l'administrateur M. YAGO."}, status=403)
+                return
+
             c.execute('SELECT id, status, name, expires_at FROM companies WHERE code = ?', (company_code,))
             row = c.fetchone()
             conn.close()
@@ -275,7 +295,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                 self.send_json({'success': False, 'status': 'not_found', 'error': "Entreprise non trouvée sur le serveur."}, status=404)
                 return
             if row[1] != 'active':
-                self.send_json({'success': False, 'status': 'suspended', 'error': "L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
+                self.send_json({'success': False, 'status': 'suspended', 'error': "⛔ ACCÈS SUSPENDU : L'accès de cette entreprise a été suspendu par l'administrateur M. YAGO."}, status=403)
                 return
             self.send_json({'success': True, 'status': 'active', 'name': row[2], 'expires_at': row[3]})
             return
@@ -531,6 +551,11 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                     return
                 new_status = 'suspended' if row[0] == 'active' else 'active'
                 c.execute('UPDATE companies SET status = ? WHERE id = ?', (new_status, cid))
+                if new_status == 'active':
+                    c.execute('SELECT code FROM companies WHERE id = ?', (cid,))
+                    c_row = c.fetchone()
+                    if c_row:
+                        c.execute('DELETE FROM deleted_companies WHERE code = ?', (c_row[0],))
                 conn.commit()
                 conn.close()
                 self.send_json({'success': True, 'new_status': new_status})
@@ -551,6 +576,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                     self.send_json({'success': False, 'error': 'Entreprise non trouvée'}, status=404)
                     return
                 c_name, c_code = row[0], row[1]
+                c.execute('INSERT OR REPLACE INTO deleted_companies (code, name, deleted_at) VALUES (?, ?, ?)', (c_code, c_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 c.execute('DELETE FROM companies WHERE id = ?', (cid,))
                 conn.commit()
                 conn.close()
