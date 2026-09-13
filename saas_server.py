@@ -655,7 +655,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             if not found_company or not target_user:
                 self.send_json({
                     'success': False, 
-                    'status': 'deleted',
+                    'status': 'not_found',
                     'reason': 'ACCOUNT_NOT_FOUND',
                     'error': "Aucun compte n'est associé à cet identifiant ou l'entreprise a été supprimée."
                 }, status=404)
