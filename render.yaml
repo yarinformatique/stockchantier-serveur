@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: stockchantier-server
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: ""
+    startCommand: python saas_server.py
+    healthCheckPath: /health
+    autoDeploy: true

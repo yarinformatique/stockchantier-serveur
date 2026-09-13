@@ -1,0 +1,2 @@
+# Aucun package externe requis ! Le serveur de synchronisation utilise la bibliothèque standard Python (sqlite3, http.server, json, hashlib, threading).
+# Fonctionne sur n'importe quel hébergeur Python 3.8+
