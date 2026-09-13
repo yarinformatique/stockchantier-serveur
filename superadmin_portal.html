@@ -768,7 +768,8 @@
         ceo_password: comp.ceo_password || comp.ceo_password_clear || '1234',
         currency: comp.currency || 'FCFA',
         expires_at: comp.expires_at || '31/12/2026',
-        server_url: serverOrigin
+        server_url: serverOrigin,
+        users: comp.users || []
       };
       const passToken = 'SCPASS-' + btoa(unescape(encodeURIComponent(JSON.stringify(passObj))));
       const passEl = document.getElementById('cred-pass-token');
