@@ -256,21 +256,63 @@
 </head>
 <body>
 
-  <header>
-    <div class="brand">
-      <div class="brand-logo"><i class="fa-solid fa-crown"></i></div>
-      <div class="brand-text">
-        <h1>StockChantier Pro <span class="editor-badge">ÉDITEUR SAAS</span></h1>
-        <p>YAR INFORMATIQUE — Abdoul YAGO • Ouagadougou (Burkina Faso)</p>
+  <!-- ÉCRAN DE CONNEXION SÉCURISÉE SUPER-ADMINISTRATEUR (OBLIGATOIRE) -->
+  <div id="superadmin-auth-screen" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: radial-gradient(circle at center, #1e293b 0%, #0a0f1d 100%);">
+    <div style="background: #111827; border: 1px solid #374151; border-radius: 16px; padding: 36px 32px; width: 100%; max-width: 420px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); text-align: center;">
+      <div style="width: 68px; height: 68px; background: linear-gradient(135deg, #f59e0b, #d97706); border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 2rem; color: #000; margin-bottom: 20px; box-shadow: 0 10px 25px rgba(245, 158, 11, 0.3);">
+        <i class="fa-solid fa-crown"></i>
+      </div>
+      <h2 style="font-size: 1.35rem; font-weight: 800; color: #f8fafc; margin-bottom: 6px;">PORTAIL ÉDITEUR SAAS</h2>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 24px;">YAR INFORMATIQUE • Direction M. YAGO</p>
+
+      <form id="form-superadmin-login" onsubmit="handleSuperAdminLogin(event)" style="text-align: left;">
+        <div class="form-group mb-3" style="margin-bottom: 16px;">
+          <label style="font-size: 0.8rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 6px;">
+            <i class="fa-solid fa-user" style="color: #38bdf8; margin-right: 6px;"></i> Identifiant Super-Admin
+          </label>
+          <input type="text" id="login-identifier" required class="form-control" placeholder="yarinformatique" autofocus style="width: 100%; box-sizing: border-box;">
+        </div>
+
+        <div class="form-group mb-3" style="margin-bottom: 20px;">
+          <label style="font-size: 0.8rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 6px;">
+            <i class="fa-solid fa-lock" style="color: #f59e0b; margin-right: 6px;"></i> Code Secret d'Accès
+          </label>
+          <input type="password" id="login-password" required class="form-control" placeholder="••••" style="width: 100%; box-sizing: border-box;">
+        </div>
+
+        <div id="login-error-msg" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; font-size: 0.82rem; padding: 8px 12px; border-radius: 8px; margin-bottom: 16px; text-align: center;"></div>
+
+        <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-weight: 700; font-size: 0.95rem; justify-content: center; background: linear-gradient(135deg, #0284c7, #0369a1);">
+          <i class="fa-solid fa-right-to-bracket"></i> Accéder à la Console
+        </button>
+      </form>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #1f2937; font-size: 0.75rem; color: #64748b;">
+        Accès strictement réservé à la direction • Sécurité Cloud SSL
       </div>
     </div>
-    <div class="header-actions">
-      <span style="font-size: 0.82rem; color: #34d399;"><i class="fa-solid fa-circle" style="font-size: 0.6rem;"></i> Serveur Cloud Actif</span>
-      <button class="btn btn-primary" onclick="openModalCreate()">
-        <i class="fa-solid fa-plus"></i> Inscrire un Nouveau Client
-      </button>
-    </div>
-  </header>
+  </div>
+
+  <!-- APPLICATION PRINCIPALE (MASQUÉE TANT QUE NON AUTHENTIFIÉ) -->
+  <div id="superadmin-app" style="display: none;">
+    <header>
+      <div class="brand">
+        <div class="brand-logo"><i class="fa-solid fa-crown"></i></div>
+        <div class="brand-text">
+          <h1>StockChantier Pro <span class="editor-badge">ÉDITEUR SAAS</span></h1>
+          <p>YAR INFORMATIQUE — Abdoul YAGO • Ouagadougou (Burkina Faso)</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span style="font-size: 0.82rem; color: #34d399;"><i class="fa-solid fa-circle" style="font-size: 0.6rem;"></i> Serveur Cloud Actif</span>
+        <button class="btn btn-primary" onclick="openModalCreate()">
+          <i class="fa-solid fa-plus"></i> Inscrire un Nouveau Client
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="logoutSuperAdmin()" title="Se déconnecter" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); margin-left: 6px;">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i> Déconnexion
+        </button>
+      </div>
+    </header>
 
   <main>
     <!-- KPIs -->
@@ -483,13 +525,99 @@
       </div>
     </div>
   </div>
+  </div> <!-- Fin superadmin-app -->
 
   <script>
     const API_BASE = (window.location.origin && !window.location.origin.startsWith('file:') && window.location.origin !== 'null') 
       ? window.location.origin 
-      : 'http://localhost:9000';
+      : 'https://stockchantier-serveur.onrender.com';
     let allCompaniesCache = [];
     let loadRetries = 0;
+
+    const AUTH_STORAGE_KEY = 'stockchantier_superadmin_auth_token';
+
+    function checkSuperAdminAuth() {
+      const token = sessionStorage.getItem(AUTH_STORAGE_KEY);
+      const authScreen = document.getElementById('superadmin-auth-screen');
+      const appEl = document.getElementById('superadmin-app');
+      if (token) {
+        if (authScreen) authScreen.style.display = 'none';
+        if (appEl) appEl.style.display = 'block';
+        loadCompanies();
+      } else {
+        if (authScreen) authScreen.style.display = 'flex';
+        if (appEl) appEl.style.display = 'none';
+        const inp = document.getElementById('login-identifier');
+        if (inp) setTimeout(() => inp.focus(), 150);
+      }
+    }
+
+    async function handleSuperAdminLogin(event) {
+      event.preventDefault();
+      const identEl = document.getElementById('login-identifier');
+      const pwdEl = document.getElementById('login-password');
+      const errEl = document.getElementById('login-error-msg');
+      const submitBtn = document.getElementById('btn-login-submit');
+
+      const identifier = identEl ? identEl.value.trim() : '';
+      const password = pwdEl ? pwdEl.value.trim() : '';
+
+      if (errEl) errEl.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Vérification...';
+      }
+
+      try {
+        let success = false;
+        let token = '';
+
+        try {
+          const res = await fetch(`${API_BASE}/api/superadmin/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: identifier, password: password })
+          });
+          const data = await res.json();
+          if (data && data.success) {
+            success = true;
+            token = data.token || ('token-' + Date.now());
+          }
+        } catch (fetchErr) {
+          console.warn("Connexion réseau:", fetchErr);
+        }
+
+        // Vérification directe de sécurité pour yarinformatique et 1762
+        if (!success && (identifier.toLowerCase() === 'yarinformatique' || identifier.toLowerCase() === 'abdoul yago') && password === '1762') {
+          success = true;
+          token = 'token-direct-' + Date.now();
+        }
+
+        if (success) {
+          sessionStorage.setItem(AUTH_STORAGE_KEY, token);
+          const authScreen = document.getElementById('superadmin-auth-screen');
+          const appEl = document.getElementById('superadmin-app');
+          if (authScreen) authScreen.style.display = 'none';
+          if (appEl) appEl.style.display = 'block';
+          loadCompanies();
+        } else {
+          if (errEl) {
+            errEl.textContent = 'Identifiant ou code secret incorrect.';
+            errEl.style.display = 'block';
+          }
+        }
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Accéder à la Console';
+        }
+      }
+    }
+
+    function logoutSuperAdmin() {
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      window.location.reload();
+    }
 
     async function loadCompanies() {
       const tbody = document.getElementById('companies-table-body');
@@ -838,7 +966,7 @@
       });
     }
 
-    window.addEventListener('DOMContentLoaded', loadCompanies);
+    window.addEventListener('DOMContentLoaded', checkSuperAdminAuth);
   </script>
 </body>
 </html>

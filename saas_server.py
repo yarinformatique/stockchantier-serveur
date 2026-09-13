@@ -91,17 +91,21 @@ def init_db():
         )
     ''')
 
-    # Créer ou mettre à jour le compte Super-Admin (Abdoul Yago avec code 1762)
+    # Créer ou mettre à jour le compte Super-Admin (yarinformatique avec code 1762)
     pwd_1762 = hashlib.sha256("1762".encode()).hexdigest()
     pwd_legacy = hashlib.sha256("superadmin123".encode()).hexdigest()
     c.execute('DELETE FROM superadmin')
     c.execute('''
         INSERT INTO superadmin (id, email, password_hash, name)
-        VALUES (1, 'Abdoul Yago', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
+        VALUES (1, 'yarinformatique', ?, 'Direction YAR INFORMATIQUE — M. YAGO')
     ''', (pwd_1762,))
     c.execute('''
         INSERT OR IGNORE INTO superadmin (id, email, password_hash, name)
-        VALUES (2, 'superadmin@stockchantier.com', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
+        VALUES (2, 'Abdoul Yago', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
+    ''', (pwd_1762,))
+    c.execute('''
+        INSERT OR IGNORE INTO superadmin (id, email, password_hash, name)
+        VALUES (3, 'superadmin@stockchantier.com', ?, 'Abdoul Yago — Direction YAR INFORMATIQUE')
     ''', (pwd_legacy,))
     
     conn.commit()
@@ -340,7 +344,7 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
                 self.send_json({'success': False, 'error': str(e)}, status=500)
             return
 
-        # 1. Login Super-Admin (Abdoul YAGO)
+        # 1. Login Super-Admin (YAR INFORMATIQUE — M. YAGO)
         if path == '/api/superadmin/login':
             identifier = body.get('email', '').strip().lower()
             password = body.get('password', '').strip()
@@ -349,21 +353,21 @@ class SaaSRequestHandler(SimpleHTTPRequestHandler):
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             c.execute('''
-                SELECT id, name FROM superadmin 
+                SELECT id, name, email FROM superadmin 
                 WHERE (LOWER(email) = ? OR LOWER(name) LIKE ?)
                   AND (password_hash = ? OR ? IN ('1762', 'superadmin123'))
             ''', (identifier, f'%{identifier}%', pwd_hash, password))
             row = c.fetchone()
             conn.close()
 
-            # Permettre directement Abdoul Yago avec 1762
-            if not row and ('abdoul' in identifier or 'yago' in identifier or 'superadmin' in identifier) and (password in ('1762', 'superadmin123')):
-                row = (1, 'Abdoul Yago — Direction YAR INFORMATIQUE')
+            # Permettre directement yarinformatique ou Abdoul Yago avec 1762
+            if not row and ('yarinformatique' in identifier or 'abdoul' in identifier or 'yago' in identifier or 'superadmin' in identifier) and (password in ('1762', 'superadmin123')):
+                row = (1, 'Direction YAR INFORMATIQUE — M. YAGO', 'yarinformatique')
 
             if row:
-                self.send_json({'success': True, 'token': str(uuid.uuid4()), 'name': row[1], 'email': 'Abdoul Yago'})
+                self.send_json({'success': True, 'token': str(uuid.uuid4()), 'name': row[1], 'email': row[2] if len(row) > 2 else 'yarinformatique'})
             else:
-                self.send_json({'success': False, 'error': 'Identifiant ou code incorrect. (Ex: Abdoul Yago / 1762)'}, status=401)
+                self.send_json({'success': False, 'error': 'Identifiant ou code secret incorrect.'}, status=401)
             return
 
         # 2. Création d'une nouvelle entreprise cliente par M. YAGO
